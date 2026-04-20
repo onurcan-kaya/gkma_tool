@@ -1,0 +1,78 @@
+# ==========================================================================
+#  LAMMPS input: NVE trajectory for GKMA thermal conductivity
+#  Produces dump_gkma.lammpstrj and heatflux_total.dat
+#
+#  Adjust:  DATA_FILE, PAIR_STYLE block, TEMPERATURE, TIMESTEP,
+#           DUMP_FREQ, NVT_STEPS, NVE_STEPS
+#
+#  The dump must contain:
+#     id x y z vx vy vz  c_pe  c_s[1] c_s[2] c_s[3] c_s[4] c_s[5] c_s[6]
+#
+#  Required per-atom computes:
+#     c_pe   = per-atom potential energy
+#     c_s    = per-atom stress tensor (6 Voigt components, bar*A^3)
+# ==========================================================================
+
+# ---- Variables (edit these) ----
+variable        DATA_FILE   string "300K.data"
+variable        TEMPERATURE equal  300.0
+variable        TIMESTEP    equal  0.0001      # ps  (0.1 fs for light elements)
+variable        DUMP_FREQ   equal  100
+variable        NVT_STEPS   equal  50000       # thermalisation
+variable        NVE_STEPS   equal  2000000     # production (adjust for convergence)
+
+# ---- Setup ----
+units           metal
+dimension       3
+boundary        p p p
+atom_style      atomic
+
+read_data       ${DATA_FILE}
+
+# ---- Potential ----
+# Replace with your potential
+pair_style      quip
+pair_coeff      * * gap.xml "Potential xml_label=GAP_2024" 5 7
+
+# ---- Per-atom computes ----
+compute         pe all pe/atom
+compute         s  all stress/atom NULL
+
+# ---- Total heat flux (for GK validation) ----
+compute         ke_atom all ke/atom
+compute         flux all heat/flux ke_atom pe s
+variable        Jx equal c_flux[1]
+variable        Jy equal c_flux[2]
+variable        Jz equal c_flux[3]
+
+# ---- Thermalisation (NVT) ----
+velocity        all create ${TEMPERATURE} 12345 dist gaussian
+timestep        ${TIMESTEP}
+fix             nvt all nvt temp ${TEMPERATURE} ${TEMPERATURE} $(100*v_TIMESTEP)
+thermo          1000
+thermo_style    custom step temp pe ke etotal press
+
+run             ${NVT_STEPS}
+
+unfix           nvt
+reset_timestep  0
+
+# ---- Production (NVE) ----
+fix             nve all nve
+
+# Dump: atom positions, velocities, per-atom PE, per-atom stress
+dump            gkma all custom ${DUMP_FREQ} dump_gkma.lammpstrj &
+                id x y z vx vy vz c_pe c_s[1] c_s[2] c_s[3] c_s[4] c_s[5] c_s[6]
+dump_modify     gkma sort id format float %20.12g
+
+# Total heat flux time series (for GK cross-check)
+fix             hf_out all print ${DUMP_FREQ} &
+                "$(step) ${Jx} ${Jy} ${Jz}" &
+                file heatflux_total.dat screen no title "# step Jx Jy Jz"
+
+thermo          5000
+thermo_style    custom step temp pe ke etotal press
+
+run             ${NVE_STEPS}
+
+print "GKMA trajectory production complete"

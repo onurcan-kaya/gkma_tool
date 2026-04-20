@@ -1,0 +1,35 @@
+# ==========================================================================
+#  LAMMPS input: Dynamical matrix computation
+#  Produces dynmat.dat in ESKM format for gkma_tool eigensystem
+#
+#  Adjust:  DATA_FILE, PAIR_STYLE block, TEMPERATURE, TIMESTEP
+# ==========================================================================
+
+units           metal
+dimension       3
+boundary        p p p
+atom_style      atomic
+
+# ---- Structure ----
+read_data       DATA_FILE                   # <-- your equilibrated data file
+
+# ---- Potential ----
+# Replace with your potential (e.g. GAP, Tersoff, SW, etc.)
+pair_style      quip
+pair_coeff      * * gap.xml "Potential xml_label=GAP_2024" 5 7
+# pair_style    tersoff
+# pair_coeff    * * BN.tersoff B N
+
+# ---- Minimisation (ensure local minimum) ----
+min_style       cg
+minimize        1.0e-10 1.0e-12 10000 100000
+
+# ---- Reset before dynmat ----
+reset_timestep  0
+
+# ---- Dynamical matrix ----
+#   eskm format: mass-weighted, eigenvalues are omega^2 in THz^2
+#   delta: finite displacement in Angstrom (0.001 is typical)
+dynamical_matrix all eskm 0.001 file dynmat.dat
+
+print "Dynamical matrix written to dynmat.dat"
